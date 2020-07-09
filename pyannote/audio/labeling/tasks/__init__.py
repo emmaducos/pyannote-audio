@@ -42,9 +42,12 @@ from .domain_classification import DomainClassification
 
 from .resegmentation import Resegmentation
 
+from .dcase import Dcase
+
 
 __all__ = ['SpeechActivityDetection',
            'MultilabelDetection',
            'OverlapDetection',
            'SpeakerChangeDetection',
-           'Resegmentation']
+           'Resegmentation',
+           'Dcase']

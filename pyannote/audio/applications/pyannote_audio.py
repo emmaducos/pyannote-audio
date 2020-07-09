@@ -32,9 +32,9 @@ Neural building blocks for speaker diarization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Usage:
-  pyannote-audio (sad | scd | ovl | emb | dom | mlt) train    [--cpu | --gpu] [options] <root>     <protocol>
-  pyannote-audio (sad | scd | ovl | emb | dom | mlt) validate [--cpu | --gpu] [options] <train>    <protocol>
-  pyannote-audio (sad | scd | ovl | emb | dom | mlt) apply    [--cpu | --gpu] [options] <validate> <protocol>
+  pyannote-audio (sad | scd | ovl | emb | dom | mlt | dcase) train    [--cpu | --gpu] [options] <root>     <protocol>
+  pyannote-audio (sad | scd | ovl | emb | dom | mlt | dcase) validate [--cpu | --gpu] [options] <train>    <protocol>
+  pyannote-audio (sad | scd | ovl | emb | dom | mlt | dcase) apply    [--cpu | --gpu] [options] <validate> <protocol>
   pyannote-audio -h | --help
   pyannote-audio --version
 
@@ -56,6 +56,7 @@ for the following blocks of a speaker diarization pipeline:
     * (mlt) multilabel classification consists in predicting N labels,
             these can be broad classes of speakers : male speech vs female speech
             vs child speech for instance.
+    * (dcase) from mlt pipeline, to implement dcase 2017 Jeong TODO
 
 Running a complete speech activity detection experiment on the provided
 "debug" dataset would go like this:
@@ -284,6 +285,8 @@ from .speaker_embedding import SpeakerEmbedding
 from .domain_classification import DomainClassification
 from .labels_detection import MultilabelDetection
 
+from .dcase import Dcase
+
 
 def main():
 
@@ -309,6 +312,9 @@ def main():
 
     elif arg['mlt']:
         Application = MultilabelDetection
+
+    elif arg['dcase']:
+        Application = Dcase
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if arg['--gpu'] and device == 'cpu':
