@@ -28,12 +28,6 @@
 
 """Multilabel detection dcase"""
 
-from __future__ import print_function
-import sys
-
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -50,12 +44,37 @@ from pyannote.core.utils.numpy import one_hot_encoding
 from pyannote.database import get_annotated, get_protocol
 
 import tqdm
-#import logging
-#logging.basicConfig(filename='/home/emma/coml/experiments/pynt_test/print.log', level=logging.DEBUG)
 from .labels_detection import MultilabelDetection, MultilabelDetectionGenerator
 from pyannote.core.utils.random import random_segment
 from pyannote.core.utils.random import random_subsegment
 
+from typing import Optional, Iterator, Callable, Union, List
+try:
+    from typing import Literal
+except ImportError as e:
+    from typing_extensions import Literal
+from pathlib import Path
+import io
+import os
+import sys
+import yaml
+import torch
+import tempfile
+import warnings
+from itertools import chain
+from torch.nn import Module
+from torch.optim import Optimizer, SGD
+from torch.utils.tensorboard import SummaryWriter
+from pyannote.audio.train.logging import Logging
+from pyannote.audio.train.callback import Callback
+from pyannote.audio.train.callback import Callbacks
+from pyannote.audio.train.schedulers import BaseSchedulerCallback
+from pyannote.audio.train.schedulers import ConstantScheduler
+from pyannote.audio.train.generator import BatchGenerator
+from pyannote.audio.train.model import Model
+from pyannote.audio.utils.timeout import timeout
+from pyannote.audio.utils.background import AdaptiveBackgroundGenerator
+ARBITRARY_LR = 0.1
 
 
 class DcaseGenerator(MultilabelDetectionGenerator):
@@ -208,7 +227,6 @@ class DcaseGenerator(MultilabelDetectionGenerator):
         else:
             return self._random_samples()
 
-
     def _long_and_short_logmel_samples(self):
         """Random samples
         TODO
@@ -219,28 +237,32 @@ class DcaseGenerator(MultilabelDetectionGenerator):
         samples : generator
             Generator that yields {'X': ..., 'y': ...} samples indefinitely.
         """
-        eprint("tasks dcase random sample")
+        # eprint(">>>tasks dcase _long_and_short_logmel_samples")
         uris = list(self.data_)
-        eprint(uris)
+        #eprint(uris)
         durations = np.array([self.data_[uri]['duration'] for uri in uris])
         #eprint(durations)
         probabilities = durations / np.sum(durations)
         #eprint(probabilities)
-
-        # compute the logmel average on the entire uri
 
         while True:
 
             # choose file at random with probability
             # proportional to its (annotated) duration
             uri = uris[np.random.choice(len(uris), p=probabilities)]
-            # eprint(uri)
+            #eprint(uri.split('/')[1])
             datum = self.data_[uri]
             # eprint(datum)
             current_file = datum['current_file']
             # eprint(current_file)
 
             # load long average logmel on the entire waveform of the uri
+            LOGAVGMEL = "/home/emma/coml/dataset/TUT/logavgmel/{uri}_logavgmel.npy".format(uri=uri.split('/')[1])
+            # eprint(LOGAVGMEL)
+            # transpose to get (nb_mel, nb_frame)
+            logavgmel = np.load(LOGAVGMEL).T
+            # eprint(type(logavgmel)) #numpy.darray
+            # eprint(logavgmel.shape) #(40, 1)
 
             # choose one segment at random with probability
             # proportional to its duration
@@ -256,12 +278,19 @@ class DcaseGenerator(MultilabelDetectionGenerator):
                                              subsegment,
                                              mode='center',
                                              fixed=self.duration)
-            # eprint(X)
+            # transpose to get (nb_mel, nb_frame)
+            X = X.T
+            # eprint(X.shape) #(40, 200)
+            # eprint(type(X)) #numpy.darray
+
             y = self.crop_y(datum['y'],
                             subsegment)
             # eprint(y)
-            sample = {'X': X, 'y': y}
+
+            # add 'logavgmel info in batch'
+            sample = {'X': X, 'y': y, 'logavgmel': logavgmel}
             # eprint(sample)
+
             if self.mask is not None:
                 mask = self.crop_y(current_file[self.mask],
                                    subsegment)
@@ -302,7 +331,6 @@ class Dcase(MultilabelDetection):
     """
 
     def __init__(self, labels_spec, logavgmel=False, **kwargs):
-        # labels_spec = {'regular': ['car', 'children', 'people_speaking', 'people_walking', 'large_vehicle', 'brakes_squeaking']}
         super(Dcase, self).__init__(labels_spec, **kwargs)
 
         # Labels related attributes
@@ -333,9 +361,14 @@ class Dcase(MultilabelDetection):
 
         self.logavgmel = logavgmel
 
-    def get_batch_generator(self, feature_extraction, protocol, subset='train',
-                            resolution=None, alignment=None):
+    def get_batch_generator(self,
+                            feature_extraction,
+                            protocol,
+                            subset='train',
+                            resolution=None,
+                            alignment=None):
         """
+        TODO
         resolution : `pyannote.core.SlidingWindow`, optional
             Override `feature_extraction.sliding_window`. This is useful for
             models that include the feature extraction step (e.g. SincNet) and
@@ -345,13 +378,97 @@ class Dcase(MultilabelDetection):
             that include the feature extraction step (e.g. SincNet) and
             therefore use a different cropping mode. Defaults to 'center'.
         """
-        eprint("tasks dcase get_batch_generator")
+        print(">>>tasks dcase get_batch_generator")
         return DcaseGenerator(
             feature_extraction,
             protocol, subset=subset,
             resolution=resolution,
             alignment=alignment,
+            logavgmel=self.logavgmel,
             duration=self.duration,
             per_epoch=self.per_epoch,
             batch_size=self.batch_size,
             labels_spec=self.labels_spec)
+
+    def batch_loss(self, batch):
+        """Compute loss for current `batch`
+        TODO
+        Parameters
+        ----------
+        batch : `dict`
+            ['X'] (`numpy.ndarray`)
+            ['y'] (`numpy.ndarray`)
+            ['mask'] (`numpy.ndarray`, optional)
+            ['logavgmel'] (`numpy.ndarray`, optional)
+
+        Returns
+        -------
+        batch_loss : `dict`
+            ['loss'] (`torch.Tensor`) : Loss
+        """
+        # print(">>> tasks dcase batch_loss")
+
+        # forward pass
+        X = torch.tensor(batch['X'],
+                         dtype=torch.float32,
+                         device=self.device_)
+        # print(X.shape)
+
+        if 'logavgmel' in batch:
+            logavgmel = torch.tensor(batch['logavgmel'],
+                                     dtype=torch.float32,
+                                     device=self.device_)
+
+        X_logavgmel = {'X': X, 'logavgmel': logavgmel}
+
+        fX = self.model_(X_logavgmel)
+
+        mask = None
+        if self.task_.is_multiclass_classification:
+
+            fX = fX.view((-1, self.n_classes_))
+
+            target = torch.tensor(
+                batch['y'],
+                dtype=torch.int64,
+                device=self.device_).contiguous().view((-1, ))
+
+            if 'mask' in batch:
+                mask = torch.tensor(
+                    batch['mask'],
+                    dtype=torch.float32,
+                    device=self.device_).contiguous().view((-1, ))
+
+
+        elif self.task_.is_multilabel_classification or \
+             self.task_.is_regression:
+
+            target = torch.tensor(
+                batch['y'],
+                dtype=torch.float32,
+                device=self.device_)
+            # there is repetition on the second dimension,
+            # plus need input and target to be of the same dim for loss
+            target = target[:, 0, :].unsqueeze(1)
+
+            if 'mask' in batch:
+                mask = torch.tensor(
+                    batch['mask'],
+                    dtype=torch.float32,
+                    device=self.device_)
+
+            # if 'logavgmel' in batch:
+            #     logavgmel = torch.tensor(
+            #         batch['logavgmel'],
+            #         dtype=torch.float32,
+            #         device=self.device_)
+
+        weight = self.weight
+        if weight is not None:
+            weight = weight.to(device=self.device_)
+
+        return {
+            'loss': self.loss_func_(fX, target,
+                                    weight=weight,
+                                    mask=mask),
+        }

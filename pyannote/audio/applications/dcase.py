@@ -27,14 +27,6 @@
 # Marvin LAVECHIN - marvinlavechin@gmail.com
 # Emma DUCOS - emma.ducos@hotmail.fr
 
-from __future__ import print_function
-import sys
-
-
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
-
 import multiprocessing
 from functools import partial
 from pathlib import Path
@@ -64,19 +56,18 @@ from typing_extensions import Literal
 
 from .base_labeling import BaseLabeling
 
-# import logging
-# logging.basicConfig(filename='/home/emma/coml/experiments/pynt_test/print.log', level=logging.DEBUG)
-
 from pyannote.audio.pipeline import Dcase as DcasePipeline
 from pyannote.audio.labeling.tasks import Dcase as DcaseTask
 
 
 class Dcase(MultilabelDetection):
-    eprint("DcasePipeline instantiation")
+
+    # print(">>>DcasePipeline instantiation")
     Pipeline = DcasePipeline
 
     def validate_helper_func(self, current_file, pipeline=None, metric=None, precision=None, recall=None, label=None):
-        eprint("applications dcase validate_helper_func")
+        # print("applications dcase validate_helper_func")
+
         # Get to know how to derive the considered label
         if label in self.task_.labels_spec["regular"]:
             derivation_type = "regular"
@@ -106,7 +97,7 @@ class Dcase(MultilabelDetection):
             return metric(reference, hypothesis, uem=uem)
 
     def validation_criterion(self, protocol, precision=None, **kwargs):
-        eprint("applications dcase validation_criterion")
+        # print("applications dcase validation_criterion")
         if precision:
             return f'recall@{100 * precision:.2f}precision'
         else:
@@ -122,7 +113,7 @@ class Dcase(MultilabelDetection):
                        step=0.25,
                        precision=None,
                        **kwargs):
-        eprint("applications dcase validate_epoch")
+        # print("applications dcase validate_epoch")
 
         target_precision = precision
         label_names = self.task_.label_names
@@ -276,7 +267,7 @@ class Dcase(MultilabelDetection):
                  n_jobs: int = 1,
                  precision: int = None,
                  **kwargs):
-        eprint("applications dcase validate")
+        # print("applications dcase validate")
         # use last available epoch as starting point
         if start == 'last':
             start = self.get_number_of_epochs() - 1
@@ -418,7 +409,7 @@ class Dcase(MultilabelDetection):
         pretrained : `str`, optional
         Pipeline : `type`
         """
-        eprint("applications dcase apply_pretrained")
+        # print("applications dcase apply_pretrained")
         if pretrained is None:
             pretrained = Pretrained(validate_dir=validate_dir,
                                     duration=duration,
