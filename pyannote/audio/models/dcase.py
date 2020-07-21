@@ -225,10 +225,11 @@ class Dcase(PyanNet):
             Intermediate network output (only when `return_intermediate`
             is provided).
         """
-        # print(">>>models dcase forward")
-
+        print(">>>models dcase forward")
+        # print(input.shape)  # valid ndarray : torch.Size([32, 200, 40])
         logmel = input['X']
-        # print("logmel: ", logmel.shape)  # (64, 40, 200)
+        print(type(logmel))
+        print("logmel: ", logmel.shape)  # (64, 40, 200)
         logavgmel = input['logavgmel']
         # print("logavgmel: ", logavgmel.shape)  # (64, 40, 1)
 
