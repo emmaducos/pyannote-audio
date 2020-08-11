@@ -39,6 +39,7 @@ import yaml
 from pyannote.audio.applications.base import create_zip
 from pyannote.audio.features import Precomputed
 from pyannote.audio.features import Pretrained
+from pyannote.audio.features import RawAudio
 from pyannote.audio.features.utils import get_audio_duration
 from pyannote.audio.features.wrapper import Wrapper
 from pyannote.audio.labeling.tasks import MultilabelDetection as MultilabelTask
@@ -53,6 +54,7 @@ from sortedcontainers import SortedDict
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from typing_extensions import Literal
+from pyannote.audio.features.dcase import Dcasefeat
 
 from .base_labeling import BaseLabeling
 
@@ -62,11 +64,9 @@ from pyannote.audio.labeling.tasks import Dcase as DcaseTask
 
 class Dcase(MultilabelDetection):
 
-    # print(">>>DcasePipeline instantiation")
     Pipeline = DcasePipeline
 
     def validate_helper_func(self, current_file, pipeline=None, metric=None, precision=None, recall=None, label=None):
-        # print("applications dcase validate_helper_func")
 
         # Get to know how to derive the considered label
         if label in self.task_.labels_spec["regular"]:
@@ -88,6 +88,7 @@ class Dcase(MultilabelDetection):
                                                 regular_labels=self.task_.labels_spec[derivation_type][label])
 
         uem = get_annotated(current_file)
+        print("\napplications.dcase.validate_helper_func current_file: ", current_file)
         hypothesis = pipeline(current_file)
         if precision is not None:
             p = precision(reference, hypothesis, uem=uem)
@@ -97,7 +98,6 @@ class Dcase(MultilabelDetection):
             return metric(reference, hypothesis, uem=uem)
 
     def validation_criterion(self, protocol, precision=None, **kwargs):
-        # print("applications dcase validation_criterion")
         if precision:
             return f'recall@{100 * precision:.2f}precision'
         else:
@@ -113,13 +113,12 @@ class Dcase(MultilabelDetection):
                        step=0.25,
                        precision=None,
                        **kwargs):
-        # print("applications dcase validate_epoch")
 
         target_precision = precision
         label_names = self.task_.label_names
 
         # compute (and store) SAD scores
-        pretrained = Pretrained(validate_dir=self.validate_dir_,
+        pretrained = Dcasefeat(validate_dir=self.validate_dir_,
                                 epoch=epoch,
                                 duration=duration,
                                 step=step,
@@ -128,7 +127,9 @@ class Dcase(MultilabelDetection):
 
         for current_file in validation_data:
             # Get N scores per frame such as returned by the pretrained model
+            # print("\napplications.dcase.validate_epoch current_file before: ", current_file)
             current_file['scores'] = pretrained(current_file)
+            print("\napplications.dcase.validate_epoch current_file after: ", current_file)
 
         if target_precision:
             result = {'metric': self.validation_criterion(None, precision=precision),
@@ -267,7 +268,7 @@ class Dcase(MultilabelDetection):
                  n_jobs: int = 1,
                  precision: int = None,
                  **kwargs):
-        # print("applications dcase validate")
+
         # use last available epoch as starting point
         if start == 'last':
             start = self.get_number_of_epochs() - 1
@@ -293,6 +294,7 @@ class Dcase(MultilabelDetection):
         self.validate_dir_ = validate_dir
 
         validation_data = self.validate_init(protocol, subset=subset)
+        # print("validation_data :", validation_data)
 
         if n_jobs > 1:
             self.pool_ = multiprocessing.Pool(n_jobs)
@@ -409,9 +411,9 @@ class Dcase(MultilabelDetection):
         pretrained : `str`, optional
         Pipeline : `type`
         """
-        # print("applications dcase apply_pretrained")
+
         if pretrained is None:
-            pretrained = Pretrained(validate_dir=validate_dir,
+            pretrained = Dcasefeat(validate_dir=validate_dir,
                                     duration=duration,
                                     step=step,
                                     batch_size=batch_size,
@@ -532,3 +534,53 @@ class Dcase(MultilabelDetection):
             output_eval = output_dir / f'{protocol_name}.{subset}.{label}.eval'
             with open(output_eval, 'w') as fp:
                 fp.write(str(metric))
+
+    def validate_init(self, protocol_name,
+                            subset='development'):
+        """Initialize validation data
+
+        Parameters
+        ----------
+        protocol_name : `str`
+        subset : {'train', 'development', 'test'}
+            Defaults to 'development'.
+
+        Returns
+        -------
+        validation_data : object
+            Validation data.
+
+        """
+
+        preprocessors = self.preprocessors_
+        if "audio" not in preprocessors:
+            preprocessors["audio"] = FileFinder()
+        if 'duration' not in preprocessors:
+            preprocessors['duration'] = get_audio_duration
+        protocol = get_protocol(protocol_name,
+                                progress=False,
+                                preprocessors=preprocessors)
+        files = getattr(protocol, subset)()
+
+        # convert lazy ProtocolFile to regular dict for multiprocessing
+        files = [dict(file) for file in files]
+        # print(files)
+
+        if isinstance(self.feature_extraction_, (Precomputed, RawAudio)):
+            return files
+
+        validation_data = []
+        for current_file in tqdm(files, desc='Feature extraction'):
+
+            # load logavgmel corresponding to uri and add to dict
+            uri = current_file['uri']
+            LOGAVGMEL = "/home/emma/coml/dataset/TUT/logavgmel/{uri}_logavgmel.npy".format(uri=uri)
+            logavgmel = np.load(LOGAVGMEL).T
+            current_file['logavgmel'] = logavgmel
+
+            current_file['features'] = self.feature_extraction_(current_file)
+            validation_data.append(current_file)
+
+        # print(validation_data)
+
+        return validation_data

@@ -28,11 +28,6 @@
 # Emma DUCOS - emma.ducos@hotmail.fr
 
 """dcase pipeline"""
-from __future__ import print_function
-import sys
-
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
 
 from pathlib import Path
 from typing import Iterator
@@ -91,7 +86,10 @@ class Dcase(MultilabelDetection):
                  scores: Union[Text, Path] = None,
                  fscore: bool = False,
                  precision=None):
-        super().__init__()
+        super().__init__(label_list=label_list,
+                         considered_label=considered_label)
+
+        # print("\npipeline.dcase.__init__ scores: ", type(scores))
 
         if scores is None:
             scores = "@labels_scores"
@@ -99,14 +97,16 @@ class Dcase(MultilabelDetection):
         self.label_list = label_list
         self.considered_label = considered_label
         self.scores = scores
+        # print("\npipeline.dcase.__init__ self.scores: ", self.scores)
         self._scores = FeatureExtractionWrapper(self.scores)
+        print("\npipeline.dcase.__init__ self._scores: ", self._scores)
 
         self.fscore = fscore
         self.precision = precision
 
         # hyper-parameters
         # initialise to a random number
-        # chosen from a unniform probability law
+        # chosen from a uniform probability law
         self.onset = Uniform(0., 1.)
         self.offset = Uniform(0., 1.)
         self.min_duration_on = Uniform(0., 2.)
@@ -116,7 +116,6 @@ class Dcase(MultilabelDetection):
 
     def initialize(self):
         """Initialize pipeline with current set of parameters"""
-        eprint("pipeline dcase initialize")
         self._binarize = Binarize(onset=self.onset,
                                   offset=self.offset,
                                   min_duration_on=self.min_duration_on,
@@ -138,13 +137,12 @@ class Dcase(MultilabelDetection):
         speech : `pyannote.core.Annotation`
             Speech regions.
         """
-        eprint("pipeline dcase __call__")
 
         # This should be moved to pyannote-core/pyannote/core/utils/generators.py
         def constant_generator(elem) -> Iterator[str]:
             while True:
                 yield elem
-
+        print("\npipeline.dcase.__call__ current_file: ", current_file)
         labels_scores = self._scores(current_file)
 
         # if this check has not been done yet, do it once and for all
@@ -155,10 +153,12 @@ class Dcase(MultilabelDetection):
             else:
                 self.log_scale_ = False
 
+        print("\npipeline.dcase.__call__ labels_score: ", type(labels_scores))
         data = np.exp(labels_scores.data) if self.log_scale_ \
             else labels_scores.data
 
         col_index = self.label_list.index(self.considered_label)
+        print("\npipeline.dcase.__call__ data: ", type(data))
         activation_prob = SlidingWindowFeature(data[:, col_index], labels_scores.sliding_window)
         activation = self._binarize.apply(activation_prob)
 
@@ -169,7 +169,6 @@ class Dcase(MultilabelDetection):
 
     def get_metric(self, parallel=False) -> Union[DetectionErrorRate, DetectionPrecisionRecallFMeasure]:
         """Return new instance of detection metric"""
-        eprint("pipeline dcase get_metric")
         if self.fscore:
             return DetectionPrecisionRecallFMeasure(collar=0.0,
                                                     skip_overlap=False,
@@ -180,7 +179,6 @@ class Dcase(MultilabelDetection):
                                       parallel=parallel)
 
     def loss(self, current_file: dict, hypothesis=None):
-        eprint("pipeline dcase loss")
         reference = current_file['annotation']
         uem = get_annotated(current_file)
 

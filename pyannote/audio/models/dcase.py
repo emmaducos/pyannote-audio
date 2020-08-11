@@ -28,6 +28,12 @@
 # Emma DUCOS - emma.ducos@hotmail.fr
 
 from typing import Optional
+from typing import Callable
+from pyannote.core import SlidingWindow
+from pyannote.core import SlidingWindowFeature
+
+import numpy as np
+import pescador
 
 import torch
 import torch.nn as nn
@@ -225,13 +231,13 @@ class Dcase(PyanNet):
             Intermediate network output (only when `return_intermediate`
             is provided).
         """
-        print(">>>models dcase forward")
-        # print(input.shape)  # valid ndarray : torch.Size([32, 200, 40])
+
+        # print(input.shape)
         logmel = input['X']
-        print(type(logmel))
-        print("logmel: ", logmel.shape)  # (64, 40, 200)
+        # print(type(logmel))
+        # print("\nmodels.dcase.forward logmel: ", logmel.shape)
         logavgmel = input['logavgmel']
-        # print("logavgmel: ", logavgmel.shape)  # (64, 40, 1)
+        # print("\nmodels.dcase.forward logavgmel: ", logavgmel.shape)
 
         # if self.sincnet.get('skip', False):
         #     output = logmel
@@ -326,3 +332,146 @@ class Dcase(PyanNet):
         if layer == 0:
             return self.sincnet_.dimension
         return self.rnn_.intermediate_dimension(layer - 1)
+
+    def slide(self, features,
+              sliding_window: SlidingWindow,
+              batch_size: int = 32,
+              device: torch.device = None,
+              skip_average: bool = None,
+              postprocess: Callable[[np.ndarray], np.ndarray] = None,
+              return_intermediate=None,
+              progress_hook=None) -> SlidingWindowFeature:
+        """Slide and apply model on features
+
+        Parameters
+        ----------
+        features : TODO
+            Input features.
+        sliding_window : SlidingWindow
+            Sliding window used to apply the model.
+        batch_size : int
+            Batch size. Defaults to 32. Use large batch for faster inference.
+        device : torch.device
+            Device used for inference.
+        skip_average : bool, optional
+            For sequence labeling tasks (i.e. when model outputs a sequence of
+            scores), each time step may be scored by several consecutive
+            locations of the sliding window. Default behavior is to average
+            those multiple scores. Set `skip_average` to False to return raw
+            scores without averaging them.
+        postprocess : callable, optional
+            Function applied to the predictions of the model, for each batch
+            separately. Expects a (batch_size, n_samples, n_features) np.ndarray
+            as input, and returns a (batch_size, n_samples, any) np.ndarray.
+        return_intermediate :
+            Experimental. Not documented yet.
+        progress_hook : callable
+            Experimental. Not documented yet.
+        """
+
+        # print("models.dcase.slide features :", features)
+        logavgmel = features['logavgmel']
+        # print("\nmodels.dcase.slide logavgmel: ", features['logavgmel'].shape)
+        features = features['SlidingWindowFeature']
+        # print('\nmodel.dcase.slide features :', features)
+
+        # logavgmel = features['logavgmel']
+
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = torch.device(device)
+
+        if skip_average is None:
+            skip_average = (self.resolution == RESOLUTION_CHUNK) or \
+                           (return_intermediate is not None)
+
+        try:
+            dimension = self.dimension
+        except AttributeError:
+            dimension = len(self.classes)
+
+        resolution = self.resolution
+
+        # model returns one vector per input frame
+        if resolution == RESOLUTION_FRAME:
+            resolution = features.sliding_window
+
+        # model returns one vector per input window
+        if resolution == RESOLUTION_CHUNK:
+            resolution = sliding_window
+
+        support = features.extent
+        if support.duration < sliding_window.duration:
+            chunks = [support]
+            fixed = support.duration
+        else:
+            chunks = list(sliding_window(support, align_last=True))
+            fixed = sliding_window.duration
+
+        if progress_hook is not None:
+            n_chunks = len(chunks)
+            n_done = 0
+            progress_hook(n_done, n_chunks)
+
+        batches = pescador.maps.buffer_stream(
+            iter({'X': features.crop(window, mode='center', fixed=fixed).T,
+                  'logavgmel': logavgmel}
+                 for window in chunks),
+            batch_size, partial=True)
+
+        fX = []
+        for batch in batches:
+            # print("\nmodels.dcase.slide batch : ", batch)
+            tX = torch.tensor(batch['X'], dtype=torch.float32, device=device)
+
+
+            # to adapt to the dcase model TODO
+            tX = {'X': tX, 'logavgmel': torch.tensor(batch['logavgmel'], dtype=torch.float32, device=device)}
+            # print("\nmodels.dcase.slide tX:", tX['X'].shape)
+            # print("\nmodels.dcase.slide logavgmel:", tX['logavgmel'].shape)
+
+            # FIXME: fix support for return_intermediate
+            tfX = self(tX, return_intermediate=return_intermediate)
+
+            tfX_npy = tfX.detach().to('cpu').numpy()
+            if postprocess is not None:
+                tfX_npy = postprocess(tfX_npy)
+
+            fX.append(tfX_npy)
+
+            if progress_hook is not None:
+                n_done += len(batch['X'])
+                progress_hook(n_done, n_chunks)
+
+        fX = np.vstack(fX)
+        # print("\nmodels.dcase.slide fX: ", fX)
+
+        if skip_average:
+            return SlidingWindowFeature(fX, sliding_window)
+
+        # get total number of frames (based on last window end time)
+        n_frames = resolution.samples(chunks[-1].end, mode='center')
+
+        # data[i] is the sum of all predictions for frame #i
+        data = np.zeros((n_frames, dimension), dtype=np.float32)
+
+        # k[i] is the number of chunks that overlap with frame #i
+        k = np.zeros((n_frames, 1), dtype=np.int8)
+
+        for chunk, fX_ in zip(chunks, fX):
+            # indices of frames overlapped by chunk
+            indices = resolution.crop(chunk, mode=self.alignment, fixed=fixed)
+
+            # accumulate the outputs
+            data[indices] += fX_
+
+            # keep track of the number of overlapping sequence
+            # TODO - use smarter weights (e.g. Hamming window)
+            k[indices] += 1
+
+        # compute average embedding of each frame
+        data = data / np.maximum(k, 1)
+
+        rslt = SlidingWindowFeature(data, resolution)
+        print("\nmodels.dcase.slide rslt: ", rslt)
+        return rslt

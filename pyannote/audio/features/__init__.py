@@ -55,3 +55,11 @@ except Exception as e:
         f'Feature extraction using pretrained models are not available '
         f'because something went wrong at import: "{e}".')
     print(msg)
+
+try:
+    from .dcase import Dcasefeat
+except Exception as e:
+    msg = (
+        f'Feature extraction using pretrained models are not available '
+        f'because something went wrong at import: "{e}".')
+    print(msg)
