@@ -97,9 +97,9 @@ class Dcase(MultilabelDetection):
         self.label_list = label_list
         self.considered_label = considered_label
         self.scores = scores
-        # print("\npipeline.dcase.__init__ self.scores: ", self.scores)
+        #  print("\npipeline.dcase.__init__ self.scores: ", self.scores)
         self._scores = FeatureExtractionWrapper(self.scores)
-        print("\npipeline.dcase.__init__ self._scores: ", self._scores)
+        # print("\npipeline.dcase.__init__ self._scores: ", self._scores)
 
         self.fscore = fscore
         self.precision = precision
@@ -142,7 +142,7 @@ class Dcase(MultilabelDetection):
         def constant_generator(elem) -> Iterator[str]:
             while True:
                 yield elem
-        print("\npipeline.dcase.__call__ current_file: ", current_file)
+        # print("\npipeline.dcase.__call__ current_file: ", current_file)
         labels_scores = self._scores(current_file)
 
         # if this check has not been done yet, do it once and for all
@@ -153,12 +153,12 @@ class Dcase(MultilabelDetection):
             else:
                 self.log_scale_ = False
 
-        print("\npipeline.dcase.__call__ labels_score: ", type(labels_scores))
+        # print("\npipeline.dcase.__call__ labels_score: ", type(labels_scores))
         data = np.exp(labels_scores.data) if self.log_scale_ \
             else labels_scores.data
 
         col_index = self.label_list.index(self.considered_label)
-        print("\npipeline.dcase.__call__ data: ", type(data))
+        # print("\npipeline.dcase.__call__ data: ", type(data))
         activation_prob = SlidingWindowFeature(data[:, col_index], labels_scores.sliding_window)
         activation = self._binarize.apply(activation_prob)
 

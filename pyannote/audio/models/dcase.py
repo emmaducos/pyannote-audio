@@ -473,5 +473,5 @@ class Dcase(PyanNet):
         data = data / np.maximum(k, 1)
 
         rslt = SlidingWindowFeature(data, resolution)
-        print("\nmodels.dcase.slide rslt: ", rslt)
+        # print("\nmodels.dcase.slide rslt: ", rslt)
         return rslt

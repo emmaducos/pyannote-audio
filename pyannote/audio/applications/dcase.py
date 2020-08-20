@@ -54,16 +54,16 @@ from sortedcontainers import SortedDict
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from typing_extensions import Literal
-from pyannote.audio.features.dcase import Dcasefeat
+from pyannote.audio.features.dcase import Dcase as DcaseFeat
 
 from .base_labeling import BaseLabeling
 
 from pyannote.audio.pipeline import Dcase as DcasePipeline
 from pyannote.audio.labeling.tasks import Dcase as DcaseTask
+from pyannote.core import SlidingWindowFeature
 
 
 class Dcase(MultilabelDetection):
-
     Pipeline = DcasePipeline
 
     def validate_helper_func(self, current_file, pipeline=None, metric=None, precision=None, recall=None, label=None):
@@ -88,7 +88,7 @@ class Dcase(MultilabelDetection):
                                                 regular_labels=self.task_.labels_spec[derivation_type][label])
 
         uem = get_annotated(current_file)
-        print("\napplications.dcase.validate_helper_func current_file: ", current_file)
+        # print("\napplications.dcase.validate_helper_func current_file: ", current_file)
         hypothesis = pipeline(current_file)
         if precision is not None:
             p = precision(reference, hypothesis, uem=uem)
@@ -118,18 +118,18 @@ class Dcase(MultilabelDetection):
         label_names = self.task_.label_names
 
         # compute (and store) SAD scores
-        pretrained = Dcasefeat(validate_dir=self.validate_dir_,
-                                epoch=epoch,
-                                duration=duration,
-                                step=step,
-                                batch_size=batch_size,
-                                device=device)
+        pretrained = DcaseFeat(validate_dir=self.validate_dir_,
+                               epoch=epoch,
+                               duration=duration,
+                               step=step,
+                               batch_size=batch_size,
+                               device=device)
 
         for current_file in validation_data:
             # Get N scores per frame such as returned by the pretrained model
-            # print("\napplications.dcase.validate_epoch current_file before: ", current_file)
+            # print("\napplications.dcase.validate_epoch pretrained(current_file): ", type(pretrained(current_file)))
             current_file['scores'] = pretrained(current_file)
-            print("\napplications.dcase.validate_epoch current_file after: ", current_file)
+            # print("\napplications.dcase.validate_epoch current_file after: ", current_file)
 
         if target_precision:
             result = {'metric': self.validation_criterion(None, precision=precision),
@@ -413,11 +413,11 @@ class Dcase(MultilabelDetection):
         """
 
         if pretrained is None:
-            pretrained = Dcasefeat(validate_dir=validate_dir,
-                                    duration=duration,
-                                    step=step,
-                                    batch_size=batch_size,
-                                    device=device)
+            pretrained = DcaseFeat(validate_dir=validate_dir,
+                                   duration=duration,
+                                   step=step,
+                                   batch_size=batch_size,
+                                   device=device)
             output_dir = validate_dir / 'apply' / f'{pretrained.epoch_:04d}'
         else:
 
@@ -536,7 +536,7 @@ class Dcase(MultilabelDetection):
                 fp.write(str(metric))
 
     def validate_init(self, protocol_name,
-                            subset='development'):
+                      subset='development'):
         """Initialize validation data
 
         Parameters
@@ -571,7 +571,6 @@ class Dcase(MultilabelDetection):
 
         validation_data = []
         for current_file in tqdm(files, desc='Feature extraction'):
-
             # load logavgmel corresponding to uri and add to dict
             uri = current_file['uri']
             LOGAVGMEL = "/home/emma/coml/dataset/TUT/logavgmel/{uri}_logavgmel.npy".format(uri=uri)

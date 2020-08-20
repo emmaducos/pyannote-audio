@@ -48,7 +48,7 @@ from pyannote.audio.applications.config import load_params
 from pyannote.database import get_unique_identifier
 
 
-class Dcasefeat(Pretrained):
+class Dcase(Pretrained):
     """
 
     Parameters
@@ -102,8 +102,15 @@ class Dcasefeat(Pretrained):
         # use feature extraction from config.yml configuration file
         self.feature_extraction_ = config['feature_extraction']
 
-        super().__init__(augmentation=augmentation,
-                         validate_dir=validate_dir)
+        super().__init__(validate_dir=validate_dir,
+                         epoch=epoch,
+                         duration=duration,
+                         augmentation=augmentation,
+                         step=step,
+                         batch_size=batch_size,
+                         device=device,
+                         return_intermediate=return_intermediate,
+                         progress_hook=progress_hook)
 
         self.feature_extraction_.augmentation = self.augmentation
 
@@ -193,13 +200,18 @@ class Dcasefeat(Pretrained):
 
         # compute features
         features = self.get_features(y.data, sample_rate, current_file)
-        # print("features.pretrained.__call__ features :", features)
+        # print("features.pretrained.__call__ features :", type(features))
 
         # basic quality check
         if np.any(np.isnan(features)):
             uri = get_unique_identifier(current_file)
             msg = f'Features extracted from "{uri}" contain NaNs.'
             warnings.warn(msg.format(uri=uri))
+
+        features = SlidingWindowFeature(features,
+                                        self.feature_extraction_.sliding_window)
+
+        # print("features.pretrained.__call__ features :", type(features))
 
         return features
 
@@ -232,7 +244,7 @@ class Dcasefeat(Pretrained):
         # features = SlidingWindowFeature(
         #     self.feature_extraction_.get_features(y, sample_rate),
         #     self.feature_extraction_.sliding_window)
-        print("\npretrained.get_features current_file: ", current_file)
+        # print("\nfeatures.dcase.Dcasefeat.get_features current_file: ", current_file)
         features = {'SlidingWindowFeature': SlidingWindowFeature(self.feature_extraction_.get_features(y, sample_rate),
                                                                  self.feature_extraction_.sliding_window),
 
@@ -244,7 +256,7 @@ class Dcasefeat(Pretrained):
                                  device=self.device,
                                  return_intermediate=self.return_intermediate,
                                  progress_hook=self.progress_hook).data
-        print("\npretrained.get_features rslt: ", rslt)
+        # print("\nfeatures.dcase.Dcasefeat.get_features rslt: ", rslt)
         return rslt
 
     def get_context_duration(self) -> float:

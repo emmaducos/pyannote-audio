@@ -57,7 +57,7 @@ except Exception as e:
     print(msg)
 
 try:
-    from .dcase import Dcasefeat
+    from .dcase import Dcase
 except Exception as e:
     msg = (
         f'Feature extraction using pretrained models are not available '
