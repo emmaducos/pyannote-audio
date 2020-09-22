@@ -27,4 +27,5 @@
 # Hervé BREDIN - http://herve.niderb.fr
 
 from .models import PyanNet, SincTDNN
+#TODO: dcase
 from .dcase import Dcase

@@ -38,12 +38,11 @@ import torch
 import yaml
 from pyannote.audio.applications.base import create_zip
 from pyannote.audio.features import Precomputed
-from pyannote.audio.features import Pretrained
+
 from pyannote.audio.features import RawAudio
 from pyannote.audio.features.utils import get_audio_duration
 from pyannote.audio.features.wrapper import Wrapper
-from pyannote.audio.labeling.tasks import MultilabelDetection as MultilabelTask
-# from pyannote.audio.pipeline import MultilabelDetection
+
 from pyannote.audio.applications.labels_detection import MultilabelDetection
 from pyannote.database import FileFinder
 from pyannote.database import get_annotated
@@ -56,52 +55,13 @@ from tqdm import tqdm
 from typing_extensions import Literal
 from pyannote.audio.features.dcase import Dcase as DcaseFeat
 
-from .base_labeling import BaseLabeling
-
 from pyannote.audio.pipeline import Dcase as DcasePipeline
 from pyannote.audio.labeling.tasks import Dcase as DcaseTask
-from pyannote.core import SlidingWindowFeature
 
 
 class Dcase(MultilabelDetection):
+    # base on MarvinLvn class MultilabelDetection
     Pipeline = DcasePipeline
-
-    def validate_helper_func(self, current_file, pipeline=None, metric=None, precision=None, recall=None, label=None):
-
-        # Get to know how to derive the considered label
-        if label in self.task_.labels_spec["regular"]:
-            derivation_type = "regular"
-        elif label in self.task_.labels_spec["union"]:
-            derivation_type = "union"
-        elif label in self.task_.labels_spec["intersection"]:
-            derivation_type = "intersection"
-        else:
-            raise ValueError("%s not found in training labels : %s"
-                             % (label, self.task_.label_names))
-
-        if derivation_type == "regular":
-            reference = current_file["annotation"].subset([label])
-        else:
-            reference = DcaseTask.derives_label(current_file["annotation"],
-                                                derivation_type=derivation_type,
-                                                meta_label=label,
-                                                regular_labels=self.task_.labels_spec[derivation_type][label])
-
-        uem = get_annotated(current_file)
-        # print("\napplications.dcase.validate_helper_func current_file: ", current_file)
-        hypothesis = pipeline(current_file)
-        if precision is not None:
-            p = precision(reference, hypothesis, uem=uem)
-            r = recall(reference, hypothesis, uem=uem)
-            return p, r
-        else:
-            return metric(reference, hypothesis, uem=uem)
-
-    def validation_criterion(self, protocol, precision=None, **kwargs):
-        if precision:
-            return f'recall@{100 * precision:.2f}precision'
-        else:
-            return f'average_detection_fscore'
 
     def validate_epoch(self,
                        epoch,
@@ -118,6 +78,8 @@ class Dcase(MultilabelDetection):
         label_names = self.task_.label_names
 
         # compute (and store) SAD scores
+        #TODO: dcase
+        # nothing else has been changed in this function apart for the name of the pretrained class
         pretrained = DcaseFeat(validate_dir=self.validate_dir_,
                                epoch=epoch,
                                duration=duration,
@@ -127,9 +89,7 @@ class Dcase(MultilabelDetection):
 
         for current_file in validation_data:
             # Get N scores per frame such as returned by the pretrained model
-            # print("\napplications.dcase.validate_epoch pretrained(current_file): ", type(pretrained(current_file)))
             current_file['scores'] = pretrained(current_file)
-            # print("\napplications.dcase.validate_epoch current_file after: ", current_file)
 
         if target_precision:
             result = {'metric': self.validation_criterion(None, precision=precision),
@@ -257,132 +217,6 @@ class Dcase(MultilabelDetection):
 
             return result
 
-    def validate(self, protocol: str,
-                 subset: str = 'development',
-                 every: int = 1,
-                 start: Union[int, Literal['last']] = 1,
-                 end: Union[int, Literal['last']] = 100,
-                 chronological: bool = False,
-                 device: Optional[torch.device] = None,
-                 batch_size: int = 32,
-                 n_jobs: int = 1,
-                 precision: int = None,
-                 **kwargs):
-
-        # use last available epoch as starting point
-        if start == 'last':
-            start = self.get_number_of_epochs() - 1
-
-        # use last available epoch as end point
-        if end == 'last':
-            end = self.get_number_of_epochs() - 1
-
-        criterion = self.validation_criterion(protocol, precision,
-                                              **kwargs)
-
-        validate_dir = Path(self.VALIDATE_DIR.format(
-            train_dir=self.train_dir_,
-            _criterion=f'_{criterion}' if criterion is not None else '',
-            protocol=protocol, subset=subset))
-
-        params_yml = validate_dir / 'params.yml'
-
-        validate_dir.mkdir(parents=True, exist_ok=True)
-        writer = SummaryWriter(log_dir=str(validate_dir),
-                               purge_step=start)
-
-        self.validate_dir_ = validate_dir
-
-        validation_data = self.validate_init(protocol, subset=subset)
-        # print("validation_data :", validation_data)
-
-        if n_jobs > 1:
-            self.pool_ = multiprocessing.Pool(n_jobs)
-
-        progress_bar = tqdm(unit='iteration')
-
-        for i, epoch in enumerate(
-                self.validate_iter(start=start, end=end, step=every,
-                                   chronological=chronological)):
-
-            # {'metric': 'detection_error_rate',
-            #  'minimize': True,
-            #  'value': 0.9,
-            #  'pipeline': ...}
-            details = self.validate_epoch(epoch,
-                                          validation_data,
-                                          protocol=protocol,
-                                          subset=subset,
-                                          device=device,
-                                          batch_size=batch_size,
-                                          n_jobs=n_jobs,
-                                          precision=precision,
-                                          **kwargs)
-
-            # initialize
-            if i == 0:
-                # what is the name of the metric?
-                metric = details['metric']
-                # should the metric be minimized?
-                minimize = details['minimize']
-
-                # epoch -> value dictionary
-                values = SortedDict()
-
-                # load best epoch and value from past executions
-                if params_yml.exists():
-                    with open(params_yml, 'r') as fp:
-                        params = yaml.load(fp, Loader=yaml.SafeLoader)
-                    best_epoch = params['epoch']
-                    best_value = params[metric]
-                    values[best_epoch] = best_value
-
-            # metric value for current epoch
-            values[epoch] = details['value']
-
-            # send value to tensorboard
-            writer.add_scalar(
-                f'validate/{protocol}.{subset}/{metric}',
-                values[epoch], global_step=epoch)
-
-            # keep track of best value so far
-            if minimize:
-                best_epoch = values.iloc[np.argmin(values.values())]
-                best_value = values[best_epoch]
-
-            else:
-                best_epoch = values.iloc[np.argmax(values.values())]
-                best_value = values[best_epoch]
-
-            # if current epoch leads to the best metric so far
-            # store both epoch number and best pipeline parameter to disk
-            if best_epoch == epoch:
-
-                best = {
-                    metric: best_value,
-                    'epoch': epoch,
-                    'labels_spec': self.task_.labels_spec
-                }
-                for label in self.task_.label_names:
-                    if label in details:
-                        best[label] = {}
-                        pipeline = details[label]['pipeline']
-                        best[label]['params'] = pipeline.parameters(instantiated=True)
-                        submetric = details[label]['metric']
-                        best[label][submetric] = details[label]['value']
-
-                with open(params_yml, mode='w') as fp:
-                    fp.write(yaml.dump(best, default_flow_style=False))
-
-                # create/update zip file for later upload to torch.hub
-                hub_zip = create_zip(validate_dir)
-
-            # progress bar
-            desc = (f'{metric} | '
-                    f'Epoch #{best_epoch} = {100 * best_value:g}% (best) | '
-                    f'Epoch #{epoch} = {100 * details["value"]:g}%')
-            progress_bar.set_description(desc=desc)
-            progress_bar.update(1)
 
     # TODO: add support for torch.hub models directly in docopt
     @staticmethod
@@ -397,7 +231,9 @@ class Dcase(MultilabelDetection):
                          Pipeline: type = None,
                          **kwargs):
         """Apply pre-trained model
-        TODO Nothing changes from the multilabel detection pipeline, just the pipeline name
+        #TODO: dcase
+        Nothing changes from the multilabel detection pipeline, just the pretrained pipeline name
+
         Parameters
         ----------
         validate_dir : Path
@@ -538,6 +374,11 @@ class Dcase(MultilabelDetection):
     def validate_init(self, protocol_name,
                       subset='development'):
         """Initialize validation data
+        #TODO: dcase
+        This function has been found in the `BaseLabeling` class,
+        which is mother of the `MultilabelDetection` class.
+        It will load the logavgmel features that has already been computed before.
+        You have to change the path to find the logavgmel.
 
         Parameters
         ----------
@@ -571,6 +412,7 @@ class Dcase(MultilabelDetection):
 
         validation_data = []
         for current_file in tqdm(files, desc='Feature extraction'):
+            #TODO: dcase
             # load logavgmel corresponding to uri and add to dict
             uri = current_file['uri']
             LOGAVGMEL = "/home/emma/coml/dataset/TUT/logavgmel/{uri}_logavgmel.npy".format(uri=uri)

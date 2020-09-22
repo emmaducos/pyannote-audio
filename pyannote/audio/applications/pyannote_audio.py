@@ -31,6 +31,7 @@
 Neural building blocks for speaker diarization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#TODO: dcase
 Usage:
   pyannote-audio (sad | scd | ovl | emb | dom | mlt | dcase) train    [--cpu | --gpu] [options] <root>     <protocol>
   pyannote-audio (sad | scd | ovl | emb | dom | mlt | dcase) validate [--cpu | --gpu] [options] <train>    <protocol>
@@ -56,7 +57,8 @@ for the following blocks of a speaker diarization pipeline:
     * (mlt) multilabel classification consists in predicting N labels,
             these can be broad classes of speakers : male speech vs female speech
             vs child speech for instance.
-    * (dcase) from mlt pipeline, to implement dcase 2017 Jeong TODO
+    #TODO: dcase
+    * (dcase) from mlt pipeline, to implement dcase 2017 Jeong
 
 Running a complete speech activity detection experiment on the provided
 "debug" dataset would go like this:
@@ -313,6 +315,7 @@ def main():
     elif arg['mlt']:
         Application = MultilabelDetection
 
+    #TODO: dcase
     elif arg['dcase']:
         Application = Dcase
 
