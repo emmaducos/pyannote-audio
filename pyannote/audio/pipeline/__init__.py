@@ -37,9 +37,6 @@ from .speech_turn_segmentation import OracleSpeechTurnSegmentation
 from .speaker_diarization import SpeakerDiarization
 from .labels_detection import MultilabelDetection
 
-#TODO: dcase
-from .dcase import Dcase
-
 try:
     from .resegmentation import Resegmentation
 except NotImplementedError:

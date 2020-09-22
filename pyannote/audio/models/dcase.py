@@ -48,8 +48,10 @@ from pyannote.audio.train.model import RESOLUTION_FRAME
 
 
 class Dcase(PyanNet):
-    """waveform -> SincNet -> RNN [-> merge] [-> time_pool] -> FC -> output
-    TODO
+    """
+    TODO: dcase
+    The parameters are not used in the dcase model, but I have yet to see how to take it out without bugs
+
     Parameters
     ----------
     sincnet : `dict`, optional
@@ -66,62 +68,15 @@ class Dcase(PyanNet):
         only has effect when model is used for representation learning.
     """
 
-    @staticmethod
-    def get_alignment(sincnet=None, **kwargs):
-        """
-        """
-
-        if sincnet is None:
-            sincnet = dict()
-
-        if sincnet.get('skip', False):
-            return 'center'
-
-        return SincNet.get_alignment(**sincnet)
-
-    supports_packed = False
-
-    @staticmethod
-    def get_resolution(sincnet: Optional[dict] = None,
-                       rnn: Optional[dict] = None,
-                       **kwargs) -> Resolution:
-        """Get sliding window used for feature extraction
-
-        Parameters
-        ----------
-        sincnet : dict, optional
-        rnn : dict, optional
-
-        Returns
-        -------
-        sliding_window : `pyannote.core.SlidingWindow` or {`window`, `frame`}
-            Returns RESOLUTION_CHUNK if model returns one vector per input
-            chunk, RESOLUTION_FRAME if model returns one vector per input
-            frame, and specific sliding window otherwise.
-        """
-
-        if rnn is None:
-            rnn = {'pool': None}
-
-        if rnn.get('pool', None) is not None:
-            return RESOLUTION_CHUNK
-
-        if sincnet is None:
-            sincnet = {'skip': False}
-
-        if sincnet.get('skip', False):
-            return RESOLUTION_FRAME
-
-        return SincNet.get_resolution(**sincnet)
-
     def init(self,
              sincnet: Optional[dict] = None,
              rnn: Optional[dict] = None,
              ff: Optional[dict] = None,
              embedding: Optional[dict] = None):
-        """waveform -> SincNet -> RNN [-> merge] [-> time_pool] -> FC -> output
-        TODO
-        add cnn
+        """
+        TODO: dcase
+        The parameters are not used in the dcase model, but I have yet to see how to take it out without bugs
+
         Parameters
         ----------
         sincnet : `dict`, optional
@@ -173,6 +128,9 @@ class Dcase(PyanNet):
             self.embedding_ = Embedding(n_features, **embedding)
             return
 
+        # TODO: dcase
+        # everuthing found before in this init function was part or PynNet but should not be relevant for the dcase model
+
         # instantiate all layers
 
         self.conv_logavgmel_1 = nn.Conv1d(in_channels=40,
@@ -211,14 +169,16 @@ class Dcase(PyanNet):
 
     def forward(self, input, return_intermediate=None):
         """Forward pass
-        TODO
+        TODO: dcase
+        Where the actual model is computed.
+
         Parameters
         ----------
         input : `dict`
             ['X'] (batch_size, n_samples, 1) `torch.Tensor`
                 Batch of waveforms. In case SincNet is skipped, a tensor with shape
                 (batch_size, n_samples, n_features) is expected.
-            ['logavgmel'] (n_mel, 1) `torch.Tensor`
+            ['logavgmel'] (batch_size, n_mel, 1) `torch.Tensor`
         return_intermediate : `int`, optional
             Index of RNN layer. Returns RNN intermediate hidden state.
             Defaults to only return the final output.
@@ -232,30 +192,12 @@ class Dcase(PyanNet):
             is provided).
         """
 
-        # print(input.shape)
+        # get the short:logmel and long:logavgmel input
         logmel = input['X']
         # print(type(logmel))
         # print("\nmodels.dcase.forward logmel: ", logmel.shape)
         logavgmel = input['logavgmel']
         # print("\nmodels.dcase.forward logavgmel: ", logavgmel.shape)
-
-        # if self.sincnet.get('skip', False):
-        #     output = logmel
-        # else:
-        #     output = self.sincnet_(logmel)
-        #
-        # if return_intermediate is None:
-        #     output = self.rnn_(output)
-        # else:
-        #     if return_intermediate == 0:
-        #         intermediate = output
-        #         output = self.rnn_(output)
-        #     else:
-        #         return_intermediate -= 1
-        #         # get RNN final AND intermediate outputs
-        #         output, intermediate = self.rnn_(output, return_intermediate=True)
-        #         # only keep hidden state of requested layer
-        #         intermediate = intermediate[return_intermediate]
 
         # conv1d layer x2 on logavgmel
         logavgmel = self.conv_logavgmel_1(logavgmel)
@@ -304,13 +246,9 @@ class Dcase(PyanNet):
         output = self.dropout(output)
         # print("dropout :", output.shape)
 
-        # if self.task.is_representation_learning:
-        #     return self.embedding_(output)
-
         # last fc and activation
-        # output = output.view(64, -1)
-        # print(output.shape)
         output = self.fc2(output.transpose(1, 2))
+        # print("fc2", output.shape)
         output = self.activation_(output)
         # print("output layer :", output.shape)
 
@@ -321,18 +259,6 @@ class Dcase(PyanNet):
 
         return output, intermediate
 
-    @property
-    def dimension(self):
-        if self.task.is_representation_learning:
-            return self.embedding_.dimension
-
-        return Model.dimension.fget(self)
-
-    def intermediate_dimension(self, layer):
-        if layer == 0:
-            return self.sincnet_.dimension
-        return self.rnn_.intermediate_dimension(layer - 1)
-
     def slide(self, features,
               sliding_window: SlidingWindow,
               batch_size: int = 32,
@@ -342,10 +268,11 @@ class Dcase(PyanNet):
               return_intermediate=None,
               progress_hook=None) -> SlidingWindowFeature:
         """Slide and apply model on features
+        Here are effectively created the needed batches
 
         Parameters
         ----------
-        features : TODO
+        features : TODO: dcase
             Input features.
         sliding_window : SlidingWindow
             Sliding window used to apply the model.
@@ -369,13 +296,12 @@ class Dcase(PyanNet):
             Experimental. Not documented yet.
         """
 
+        # TODO: dcase
         # print("models.dcase.slide features :", features)
         logavgmel = features['logavgmel']
         # print("\nmodels.dcase.slide logavgmel: ", features['logavgmel'].shape)
         features = features['SlidingWindowFeature']
         # print('\nmodel.dcase.slide features :', features)
-
-        # logavgmel = features['logavgmel']
 
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -413,6 +339,7 @@ class Dcase(PyanNet):
             n_done = 0
             progress_hook(n_done, n_chunks)
 
+        # TODO: dcase
         batches = pescador.maps.buffer_stream(
             iter({'X': features.crop(window, mode='center', fixed=fixed).T,
                   'logavgmel': logavgmel}
@@ -421,11 +348,10 @@ class Dcase(PyanNet):
 
         fX = []
         for batch in batches:
-            # print("\nmodels.dcase.slide batch : ", batch)
             tX = torch.tensor(batch['X'], dtype=torch.float32, device=device)
 
-
-            # to adapt to the dcase model TODO
+            # TODO: dcase
+            # to adapt to the dcase model
             tX = {'X': tX, 'logavgmel': torch.tensor(batch['logavgmel'], dtype=torch.float32, device=device)}
             # print("\nmodels.dcase.slide tX:", tX['X'].shape)
             # print("\nmodels.dcase.slide logavgmel:", tX['logavgmel'].shape)
@@ -444,7 +370,6 @@ class Dcase(PyanNet):
                 progress_hook(n_done, n_chunks)
 
         fX = np.vstack(fX)
-        # print("\nmodels.dcase.slide fX: ", fX)
 
         if skip_average:
             return SlidingWindowFeature(fX, sliding_window)
@@ -473,5 +398,4 @@ class Dcase(PyanNet):
         data = data / np.maximum(k, 1)
 
         rslt = SlidingWindowFeature(data, resolution)
-        # print("\nmodels.dcase.slide rslt: ", rslt)
         return rslt

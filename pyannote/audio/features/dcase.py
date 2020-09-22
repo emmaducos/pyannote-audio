@@ -39,6 +39,8 @@ from pyannote.audio.train.model import RESOLUTION_FRAME
 from pyannote.audio.train.model import RESOLUTION_CHUNK
 
 from pyannote.audio.augmentation import Augmentation
+# TODO: dcase
+# name of the mother class
 from pyannote.audio.features import Pretrained
 
 from pyannote.audio.applications.config import load_config
@@ -102,6 +104,8 @@ class Dcase(Pretrained):
         # use feature extraction from config.yml configuration file
         self.feature_extraction_ = config['feature_extraction']
 
+        # TODO: dcase
+        # to accomodate with the mother class
         super().__init__(validate_dir=validate_dir,
                          epoch=epoch,
                          duration=duration,
@@ -183,6 +187,9 @@ class Dcase(Pretrained):
 
     def __call__(self, current_file):
         """Extract features from file
+        #TODO: dcase
+        from `features/base.py`
+        to get the new format of `current_file` and still extract the short term features
 
         Parameters
         ----------
@@ -210,54 +217,28 @@ class Dcase(Pretrained):
 
         features = SlidingWindowFeature(features,
                                         self.feature_extraction_.sliding_window)
-
-        # print("features.pretrained.__call__ features :", type(features))
-
         return features
 
-    @property
-    def classes(self):
-        return self.model_.classes
-
-    def get_dimension(self) -> int:
-        try:
-            dimension = self.model_.dimension
-        except AttributeError:
-            dimension = len(self.model_.classes)
-        return dimension
-
-    def get_resolution(self) -> SlidingWindow:
-
-        resolution = self.model_.resolution
-
-        # model returns one vector per input frame
-        if resolution == RESOLUTION_FRAME:
-            resolution = self.feature_extraction_.sliding_window
-
-        # model returns one vector per input window
-        if resolution == RESOLUTION_CHUNK:
-            resolution = self.chunks_
-
-        return resolution
-
     def get_features(self, y, sample_rate, current_file) -> np.ndarray:
-        # features = SlidingWindowFeature(
-        #     self.feature_extraction_.get_features(y, sample_rate),
-        #     self.feature_extraction_.sliding_window)
-        # print("\nfeatures.dcase.Dcasefeat.get_features current_file: ", current_file)
+        """
+        #TODO: dcase
+        the main function to get the short term features to be in a dictionnary format
+        with its corresponding long term features
+        """
+
         features = {'SlidingWindowFeature': SlidingWindowFeature(self.feature_extraction_.get_features(y, sample_rate),
                                                                  self.feature_extraction_.sliding_window),
 
                     'logavgmel': current_file['logavgmel']}
-        # print("features.pretrained.get_features features :", features)
-        rslt = self.model_.slide(features,
-                                 self.chunks_,
-                                 batch_size=self.batch_size,
-                                 device=self.device,
-                                 return_intermediate=self.return_intermediate,
-                                 progress_hook=self.progress_hook).data
-        # print("\nfeatures.dcase.Dcasefeat.get_features rslt: ", rslt)
-        return rslt
+
+        result = self.model_.slide(features,
+                                   self.chunks_,
+                                   batch_size=self.batch_size,
+                                   device=self.device,
+                                   return_intermediate=self.return_intermediate,
+                                   progress_hook=self.progress_hook).data
+
+        return result
 
     def get_context_duration(self) -> float:
         # FIXME: add half window duration to context?

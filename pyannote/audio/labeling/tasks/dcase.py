@@ -29,57 +29,30 @@
 """Multilabel detection dcase"""
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-from itertools import cycle
-from .base import LabelingTask
-from .base import LabelingTaskGenerator
 from pyannote.audio.train.task import Task, TaskType, TaskOutput
-from ..gradient_reversal import GradientReversal
-from pyannote.audio.models.models import RNN
-from pyannote.core import Timeline, Annotation, SlidingWindowFeature
-from pyannote.core.utils.numpy import one_hot_encoding
-from pyannote.database import get_annotated, get_protocol
 
-import tqdm
+from pyannote.core import SlidingWindowFeature
+from pyannote.core.utils.numpy import one_hot_encoding
+from pyannote.database import get_annotated
+
 from .labels_detection import MultilabelDetection, MultilabelDetectionGenerator
 from pyannote.core.utils.random import random_segment
 from pyannote.core.utils.random import random_subsegment
 
-from typing import Optional, Iterator, Callable, Union, List
 try:
     from typing import Literal
 except ImportError as e:
     from typing_extensions import Literal
-from pathlib import Path
-import io
-import os
-import sys
-import yaml
+
 import torch
-import tempfile
-import warnings
-from itertools import chain
-from torch.nn import Module
-from torch.optim import Optimizer, SGD
-from torch.utils.tensorboard import SummaryWriter
-from pyannote.audio.train.logging import Logging
-from pyannote.audio.train.callback import Callback
-from pyannote.audio.train.callback import Callbacks
-from pyannote.audio.train.schedulers import BaseSchedulerCallback
-from pyannote.audio.train.schedulers import ConstantScheduler
-from pyannote.audio.train.generator import BatchGenerator
-from pyannote.audio.train.model import Model
-from pyannote.audio.utils.timeout import timeout
-from pyannote.audio.utils.background import AdaptiveBackgroundGenerator
+
 ARBITRARY_LR = 0.1
 
 
 class DcaseGenerator(MultilabelDetectionGenerator):
     """Batch generator for training multilabel detection, following jeong2017 (DCASE 2017) ideas
-
+    #TODO: dcase
     Parameters
     ----------
     feature_extraction : `pyannote.audio.features.FeatureExtraction`
@@ -104,7 +77,7 @@ class DcaseGenerator(MultilabelDetectionGenerator):
         Which mode to use when cropping labels. This is useful for models
         that include the feature extraction step (e.g. SincNet) and
         therefore use a different cropping mode. Defaults to 'center'.
-
+    #TODO: dcase
     logavgmel : bool, optional
 
     duration : float, optional
@@ -161,6 +134,7 @@ class DcaseGenerator(MultilabelDetectionGenerator):
                  batch_size=32,
                  per_epoch: float = None):
 
+        # TODO: dcase
         self.logavgmel = logavgmel
         self.labels_spec = labels_spec
         super().__init__(feature_extraction,
@@ -173,55 +147,10 @@ class DcaseGenerator(MultilabelDetectionGenerator):
                          batch_size=batch_size,
                          per_epoch=per_epoch)
 
-    def initialize_y(self, current_file):
-        # eprint("tasks dcase initialize_y")
-        # First, one hot encode the regular classes
-        annotation = current_file['annotation'].subset(self.labels_spec['regular'])
-        y, _ = one_hot_encoding(annotation,
-                                get_annotated(current_file),
-                                self.resolution,
-                                labels=self.labels_spec["regular"],
-                                mode='center')
-        y_data = y.data
-        # Then, one hot encode the meta classes
-        for derivation_type in ['union', 'intersection']:
-            for meta_label, regular_labels in self.labels_spec[derivation_type].items():
-                derived = Dcase.derives_label(current_file["annotation"], derivation_type, meta_label,
-                                                            regular_labels)
-                z, _ = one_hot_encoding(derived, get_annotated(current_file),
-                                        self.resolution,
-                                        labels=[meta_label],
-                                        mode='center')
-
-                y_data = np.hstack((y_data, z.data))
-
-        return SlidingWindowFeature(self.postprocess_y(y_data),
-                                    y.sliding_window)
-
-    @property
-    def specifications(self):
-        specs = {
-            'task': Task(type=TaskType.MULTI_LABEL_CLASSIFICATION,
-                         output=TaskOutput.SEQUENCE),
-            'X': {'dimension': self.feature_extraction.dimension},
-            'y': {'classes': self.labels_spec["regular"] \
-                             + list(self.labels_spec['union']) \
-                             + list(self.labels_spec['intersection'])},
-        }
-
-        for key, classes in self.file_labels_.items():
-
-            # TODO. add an option to handle this list
-            # TODO. especially useful for domain-adversarial stuff
-            if key in ['duration', 'audio', 'uri']:
-                continue
-            specs[key] = {'classes': classes}
-
-        return specs
-
     def samples(self):
         if self.exhaustive:
             return self._sliding_samples()
+        # TODO: dcase
         if self.logavgmel:
             return self._long_and_short_logmel_samples()
         else:
@@ -229,67 +158,53 @@ class DcaseGenerator(MultilabelDetectionGenerator):
 
     def _long_and_short_logmel_samples(self):
         """Random samples
-        TODO
+        TODO: dcase
         changed to follow jeong2017
+        This is the batch generator to get matching short/long samples
 
         Returns
         -------
         samples : generator
             Generator that yields {'X': ..., 'y': ...} samples indefinitely.
         """
-        # eprint(">>>tasks dcase _long_and_short_logmel_samples")
         uris = list(self.data_)
-        #eprint(uris)
         durations = np.array([self.data_[uri]['duration'] for uri in uris])
-        #eprint(durations)
         probabilities = durations / np.sum(durations)
-        #eprint(probabilities)
 
         while True:
-
             # choose file at random with probability
             # proportional to its (annotated) duration
             uri = uris[np.random.choice(len(uris), p=probabilities)]
-            #eprint(uri.split('/')[1])
             datum = self.data_[uri]
-            # eprint(datum)
             current_file = datum['current_file']
-            # eprint(current_file)
 
+            # TODO: dcase
             # load long average logmel on the entire waveform of the uri
             LOGAVGMEL = "/home/emma/coml/dataset/TUT/logavgmel/{uri}_logavgmel.npy".format(uri=uri.split('/')[1])
-            # eprint(LOGAVGMEL)
             # transpose to get (nb_mel, nb_frame)
             logavgmel = np.load(LOGAVGMEL).T
-            # eprint(type(logavgmel)) #numpy.darray
-            # eprint(logavgmel.shape) #(40, 1)
 
             # choose one segment at random with probability
             # proportional to its duration
-            # eprint(datum['segments'][0])
             segment = next(random_segment(datum['segments'], weighted=True))
-            # eprint("segment:", segment)
 
             # choose fixed-duration subsegment at random
             subsegment = next(random_subsegment(segment, self.duration))
-            # eprint("subsegment:", subsegment)
 
             X = self.feature_extraction.crop(current_file,
                                              subsegment,
                                              mode='center',
                                              fixed=self.duration)
-            # transpose to get (nb_mel, nb_frame)
+            # TODO: dcase
+            # transposed to get (nb_mel, nb_frame)
             X = X.T
-            # eprint(X.shape) #(40, 200)
-            # eprint(type(X)) #numpy.darray
 
             y = self.crop_y(datum['y'],
                             subsegment)
-            # eprint(y)
 
+            # TODO: dcase
             # add 'logavgmel info in batch'
             sample = {'X': X, 'y': y, 'logavgmel': logavgmel}
-            # eprint(sample)
 
             if self.mask is not None:
                 mask = self.crop_y(current_file[self.mask],
@@ -327,7 +242,8 @@ class Dcase(MultilabelDetection):
         intersection:
             Dictionnary of intersection meta-labels whose keys are the meta-label names,
             and values are a list of regular classes
-    logavgmel: bool, optional TODO
+    TODO: dcase
+    logavgmel: bool, optional
     """
 
     def __init__(self, labels_spec, logavgmel=False, **kwargs):
@@ -358,7 +274,7 @@ class Dcase(MultilabelDetection):
         self.nb_regular_labels = len(labels_spec["regular"])
 
         self.n_classes_ = self.nb_regular_labels + len(self.union_labels) + len(self.intersection_labels)
-
+        # TODO: dcase
         self.logavgmel = logavgmel
 
     def get_batch_generator(self,
@@ -368,7 +284,7 @@ class Dcase(MultilabelDetection):
                             resolution=None,
                             alignment=None):
         """
-        TODO
+        TODO: dcase
         resolution : `pyannote.core.SlidingWindow`, optional
             Override `feature_extraction.sliding_window`. This is useful for
             models that include the feature extraction step (e.g. SincNet) and
@@ -378,12 +294,12 @@ class Dcase(MultilabelDetection):
             that include the feature extraction step (e.g. SincNet) and
             therefore use a different cropping mode. Defaults to 'center'.
         """
-        # print(">>>tasks dcase get_batch_generator")
         return DcaseGenerator(
             feature_extraction,
             protocol, subset=subset,
             resolution=resolution,
             alignment=alignment,
+            # TODO: dcase
             logavgmel=self.logavgmel,
             duration=self.duration,
             per_epoch=self.per_epoch,
@@ -392,7 +308,7 @@ class Dcase(MultilabelDetection):
 
     def batch_loss(self, batch):
         """Compute loss for current `batch`
-        TODO
+        TODO: dcase
         Parameters
         ----------
         batch : `dict`
@@ -406,21 +322,16 @@ class Dcase(MultilabelDetection):
         batch_loss : `dict`
             ['loss'] (`torch.Tensor`) : Loss
         """
-        # print(">>> tasks dcase batch_loss")
-
         # forward pass
         X = torch.tensor(batch['X'],
                          dtype=torch.float32,
                          device=self.device_)
-        # print(X.shape)
-
+        # TODO: dcase
         if 'logavgmel' in batch:
             logavgmel = torch.tensor(batch['logavgmel'],
                                      dtype=torch.float32,
                                      device=self.device_)
-
         X_logavgmel = {'X': X, 'logavgmel': logavgmel}
-
         fX = self.model_(X_logavgmel)
 
         mask = None
@@ -431,17 +342,16 @@ class Dcase(MultilabelDetection):
             target = torch.tensor(
                 batch['y'],
                 dtype=torch.int64,
-                device=self.device_).contiguous().view((-1, ))
+                device=self.device_).contiguous().view((-1,))
 
             if 'mask' in batch:
                 mask = torch.tensor(
                     batch['mask'],
                     dtype=torch.float32,
-                    device=self.device_).contiguous().view((-1, ))
-
+                    device=self.device_).contiguous().view((-1,))
 
         elif self.task_.is_multilabel_classification or \
-             self.task_.is_regression:
+                self.task_.is_regression:
 
             target = torch.tensor(
                 batch['y'],
@@ -456,12 +366,6 @@ class Dcase(MultilabelDetection):
                     batch['mask'],
                     dtype=torch.float32,
                     device=self.device_)
-
-            # if 'logavgmel' in batch:
-            #     logavgmel = torch.tensor(
-            #         batch['logavgmel'],
-            #         dtype=torch.float32,
-            #         device=self.device_)
 
         weight = self.weight
         if weight is not None:
